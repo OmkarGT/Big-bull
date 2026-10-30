@@ -211,6 +211,10 @@ works the same way on Windows, macOS and Linux, and needs no extra tooling.
 > Run it when provisioning a database, and again only when you deliberately want a fresh one -
 > it is not a migration to run on every deploy. See [DEPLOYMENT.md](DEPLOYMENT.md).
 
+On boot the server also runs a **non-destructive** check (`server/src/config/ensureSchema.js`):
+missing tables and demo stocks are created, existing rows are left alone. That is what lets a
+deployment recover by itself after the database volume is reset or wiped.
+
 If you would rather use the MySQL client directly, create the database and run the two files
 yourself:
 
@@ -266,6 +270,7 @@ Open **http://localhost:5173**, sign up with any email and password, and you sta
 | `JWT_EXPIRES_IN` | no (default `7d`) | Token lifetime |
 | `CLIENT_URL` | no (default `http://localhost:5173`) | Allowed frontend origin(s), comma separated |
 | `PRICE_ENGINE_INTERVAL_MS` | no (default `7000`) | Simulated tick interval |
+| `PRICE_HISTORY_RETENTION_HOURS` | no (default `6`) | Simulated price history kept before old rows are pruned |
 | `DATABASE_SSL` | no | Set to `true` for managed databases that require SSL |
 | `NODE_ENV` | no | Set to `production` on your host |
 
