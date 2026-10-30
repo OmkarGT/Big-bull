@@ -9,10 +9,16 @@ import { errorHandler, notFoundHandler } from './middleware/errorMiddleware.js';
 
 const app = express();
 
-// CORS: only the configured frontend origin may call the API.
+// CORS: only the configured frontend origin(s) may call the API.
+// Trailing slashes are stripped - browsers send `Origin` without one, and the
+// comparison is an exact string match, so `https://app.vercel.app/` would never
+// equal `https://app.vercel.app`.
 app.use(
   cors({
-    origin: env.clientUrl.split(',').map((value) => value.trim()),
+    origin: env.clientUrl
+      .split(',')
+      .map((value) => value.trim().replace(/\/+$/, ''))
+      .filter(Boolean),
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     credentials: true,
   })

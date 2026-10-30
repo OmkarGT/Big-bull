@@ -207,6 +207,10 @@ works the same way on Windows, macOS and Linux, and needs no extra tooling.
 (it uses `INSERT IGNORE`), so running `db:setup` twice leaves you with exactly one copy of the
 12 stocks and their initial price history.
 
+> **`db:setup` is destructive.** Dropping the tables also drops every user, holding and trade.
+> Run it when provisioning a database, and again only when you deliberately want a fresh one -
+> it is not a migration to run on every deploy. See [DEPLOYMENT.md](DEPLOYMENT.md).
+
 If you would rather use the MySQL client directly, create the database and run the two files
 yourself:
 
@@ -442,6 +446,12 @@ same instant.
 
 ## Deployment
 
+**Step-by-step Vercel + Railway guide: [DEPLOYMENT.md](DEPLOYMENT.md)** - it covers creating the
+Railway project, the MySQL service, the one-time `npm run db:setup`, the Vercel build settings,
+wiring `CLIENT_URL` for CORS, and a curl checklist for every endpoint.
+
+The notes below are the host-agnostic version of the same steps.
+
 ### 1. Database
 
 Create a managed MySQL database (PlanetScale, Aiven, Railway, Render, TiDB Cloud, Amazon RDS,
@@ -491,7 +501,8 @@ Because the app uses client-side routing, add a rewrite so deep links do not 404
 
 | Problem | Fix |
 | --- | --- |
-| `Missing environment variable(s): DATABASE_URL, JWT_SECRET` | Copy `server/.env.example` to `server/.env` and fill it in |
+| `Invalid environment configuration: DATABASE_URL is not set` | Copy `server/.env.example` to `server/.env` and fill it in |
+| `DATABASE_URL must be a MySQL connection string` | `DATABASE_URL` is not a `mysql://` URL - an HTTP URL or a typo will never connect |
 | `ECONNREFUSED` / `Database did not respond` | Make sure the MySQL server is running and `DATABASE_URL` is correct |
 | `ER_ACCESS_DENIED_ERROR` | Wrong username or password in `DATABASE_URL`. Check the MySQL root password |
 | `ER_BAD_DB_ERROR` / `Unknown database 'big_bull'` | The database does not exist - run `npm run db:setup`, which creates it |

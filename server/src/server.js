@@ -1,12 +1,18 @@
 import app from './app.js';
 import { env } from './config/env.js';
 import { pool, testConnection } from './config/db.js';
+import { ensureSchema } from './config/ensureSchema.js';
 import { startPriceEngine, stopPriceEngine } from './services/priceEngine.js';
 
 let server;
 
 async function bootstrap() {
   try {
+    // Recreates the database/tables/demo stocks if the volume was wiped. Safe
+    // on every boot, and it is what recovers the app after a Railway disk
+    // reset. It also makes the first connection, so it runs before the test.
+    await ensureSchema();
+
     const connected = await testConnection();
     if (!connected) throw new Error('Database did not respond to a test query');
     console.log('[db] connected to MySQL');
@@ -31,7 +37,7 @@ async function bootstrap() {
     startPriceEngine();
   } catch (error) {
     console.error('[api] Failed to start:', error.message);
-    console.error('[api] Check that server/.env has a valid DATABASE_URL and that you ran database/schema.sql');
+    console.error('[api] Check that DATABASE_URL points at MySQL and that the database user may create tables');
     process.exit(1);
   }
 }

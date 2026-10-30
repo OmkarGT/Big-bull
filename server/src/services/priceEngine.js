@@ -39,6 +39,15 @@ const MIN_PRICE = 1; // hard floor so a price can never reach zero
 let timer = null;
 let running = false;
 
+// Each tick writes one price_history row per stock (12 rows). Unlimited growth
+// is what filled the Railway MySQL volume, so old points are deleted about
+// once an hour. Start at the limit so an oversized table is trimmed on boot.
+const PRUNE_EVERY_TICKS = Math.max(
+  1,
+  Math.round(3_600_000 / Math.max(env.priceEngineIntervalMs, 1))
+);
+let ticksSincePrune = PRUNE_EVERY_TICKS;
+
 /** Round to 2 decimal places without float surprises. */
 function round2(value) {
   return Math.round((value + Number.EPSILON) * 100) / 100;
@@ -48,6 +57,26 @@ function round2(value) {
 function pickMovement(volatility) {
   const raw = (Math.random() * 2 - 1) * volatility;
   return Math.max(-MAX_MOVEMENT, Math.min(MAX_MOVEMENT, raw));
+}
+
+/**
+ * Drop price points older than the retention window.
+ *
+ * Age is compared using the connection's session time zone, which db.js pins
+ * to UTC - the same clock CURRENT_TIMESTAMP writes with.
+ */
+async function prunePriceHistory(client) {
+  const [result] = await client.query(
+    'DELETE FROM price_history WHERE recorded_at < (NOW() - INTERVAL ? HOUR)',
+    [env.historyRetentionHours]
+  );
+
+  if (result.affectedRows > 0) {
+    console.log(
+      `[price-engine] pruned ${result.affectedRows} price points older than ` +
+        `${env.historyRetentionHours}h`
+    );
+  }
 }
 
 /**
@@ -87,6 +116,18 @@ export async function tickPrices() {
 
     await client.commit();
     console.log(`[price-engine] simulated tick applied to ${stocks.length} stocks`);
+
+    // Housekeeping never fails a tick - the prices are already committed.
+    ticksSincePrune += 1;
+    if (ticksSincePrune >= PRUNE_EVERY_TICKS) {
+      ticksSincePrune = 0;
+
+      try {
+        await prunePriceHistory(client);
+      } catch (error) {
+        console.error('[price-engine] could not prune price history:', error.message);
+      }
+    }
   } catch (error) {
     await client.rollback();
     console.error('[price-engine] tick failed:', error.message);

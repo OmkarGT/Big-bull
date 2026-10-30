@@ -3,55 +3,77 @@
  *
  * Run it from the project root with:  npm run db:setup
  *
- * The MySQL client (`mysql`, `psql`-style shell redirects) is not required and
- * the same command works on Windows, macOS and Linux. It also creates the
- * database first if it is missing, so `createdb` is not needed either.
+ * The `mysql` command-line client is not required, and the same command works
+ * on Windows, macOS and Linux. It also creates the database first if it is
+ * missing, so creating it by hand is not needed either.
+ *
+ * WARNING: schema.sql drops and recreates every table. Run it once when
+ * provisioning a database (and again only when you deliberately want a fresh
+ * one) - it is NOT a safe "run on every deploy" migration.
  */
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import mysql from 'mysql2/promise';
-import { buildPoolConfig } from '../src/config/mysqlUrl.js';
+import { buildPoolConfig, databaseUrlProblem } from '../src/config/mysqlUrl.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const databaseDir = path.resolve(here, '..', '..', 'database');
 
 const FILES = ['schema.sql', 'seed.sql'];
 
-function createPool() {
-  // includeDatabase: false - the database may not exist yet.
-  const config = buildPoolConfig({ includeDatabase: false });
-  return mysql.createPool({
-    ...config,
-    multipleStatements: true,
-    connectionLimit: 1,
-  });
-}
-
 async function main() {
-  if (!process.env.DATABASE_URL) {
-    console.error('\nDATABASE_URL is missing.');
-    console.error('Copy server/.env.example to server/.env and fill in the values.\n');
+  const dbProblem = databaseUrlProblem();
+  if (dbProblem) {
+    console.error(`\nCannot connect to MySQL: ${dbProblem}`);
+    console.error('Set DATABASE_URL (or MYSQLHOST / MYSQLUSER / MYSQLDATABASE) and try again.\n');
     process.exit(1);
   }
 
   const { database } = buildPoolConfig();
-  const pool = createPool();
+
+  if (!database) {
+    console.error('\nThe connection string has no database name.');
+    console.error('Append it, e.g. DATABASE_URL=mysql://user:pass@host:3306/big_bull\n');
+    process.exit(1);
+  }
+
+  // Connect to the server itself rather than the target database, because the
+  // database may not exist yet.
+  const pool = mysql.createPool({
+    ...buildPoolConfig({ includeDatabase: false }),
+    multipleStatements: true,
+    connectionLimit: 1,
+  });
+
+  // One dedicated connection: `USE` only lasts for the session, so keeping
+  // every statement below on the same connection makes it unambiguous.
+  const connection = await pool.getConnection();
 
   try {
-    // 1. Make sure the database exists.
-    await pool.query(
-      `CREATE DATABASE IF NOT EXISTS \`${database}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`
+    // Create the database only if it is genuinely missing. Checking first
+    // avoids a permission error on hosts where the application user may use
+    // the database but is not allowed to create one (common on managed MySQL).
+    const [existing] = await connection.query(
+      'SELECT SCHEMA_NAME FROM INFORMATION_SCHEMA.SCHEMATA WHERE SCHEMA_NAME = ?',
+      [database]
     );
-    console.log(`[db:setup] database '${database}' is ready`);
 
-    // 2. Apply the SQL files in order.
+    if (existing.length === 0) {
+      await connection.query(
+        `CREATE DATABASE \`${database}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`
+      );
+      console.log(`[db:setup] created database '${database}'`);
+    } else {
+      console.log(`[db:setup] using existing database '${database}'`);
+    }
+
+    await connection.query(`USE \`${database}\``);
+
     for (const file of FILES) {
-      const filePath = path.join(databaseDir, file);
-      const sql = await fs.readFile(filePath, 'utf8');
+      const sql = await fs.readFile(path.join(databaseDir, file), 'utf8');
 
-      await pool.query(`USE \`${database}\``);
-      await pool.query(sql);
+      await connection.query(sql);
 
       console.log(`[db:setup] applied ${file}`);
     }
@@ -61,6 +83,7 @@ async function main() {
     console.error('[db:setup] failed:', error.message);
     process.exitCode = 1;
   } finally {
+    connection.release();
     await pool.end();
   }
 }

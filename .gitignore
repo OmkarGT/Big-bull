@@ -29,3 +29,6 @@ Thumbs.db
 # Database dumps
 database/*.dump
 database/*.sql.bak
+
+# Local verification scripts
+.scratch/
